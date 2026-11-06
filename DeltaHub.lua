@@ -920,7 +920,7 @@ function Library:CreateWindow(opts)
 		if not double then
 			local lone, y = #p.sections == 1, 0
 			for _, s in ipairs(p.sections) do
-				local cap = lone and style.LoneMax or grid
+				local cap = lone and math.min(style.LoneMax, grid) or grid
 				local w = math.min(W, cap, s.maxW or math.huge)
 				s.to = { x = math.floor((W - w) / 2), y = y, w = w }
 				y += heightOf(s) + style.SectionGap
@@ -1752,13 +1752,14 @@ function Library:CreateWindow(opts)
 
 	-- Dropdown list lives on the root so the page scroll can't clip it; flips up and clamps to the screen.
 	-- isSelected(v) decides highlight; pick(v) returns true to keep the list open (multi-select).
-	local function openList(anchor, options, isSelected, pick)
+	local function openList(anchor, options, isSelected, pick, searchable)
 		closePopup()
+		local searchHeight = searchable and 36 or 0
 		local function placement()
 			local vs, off = root.AbsoluteSize, root.AbsolutePosition
 			local ap, as = anchor.AbsolutePosition - off, anchor.AbsoluteSize
-			local w = math.max(as.X, 140)
-			local h = math.min(math.min(#options, 7) * 28 + 2, vs.Y - 8) -- shows 7 rows, then scrolls
+			local w = math.min(math.max(as.X, 140), math.max(1, vs.X - 8))
+			local h = math.max(1, math.min(math.max(1, #options) * 28 + 2 + searchHeight, 7 * 28 + 2 + searchHeight, vs.Y - 8))
 			local x = math.clamp(ap.X + as.X - w, 4, math.max(4, vs.X - w - 4))
 			local y = ap.Y + as.Y + 4
 			if y + h > vs.Y - 4 then y = math.max(4, ap.Y - h - 4) end
@@ -1766,22 +1767,48 @@ function Library:CreateWindow(opts)
 		end
 		local x, y, w, h = placement()
 		popup = new("TextButton", { Name = "Popup", Parent = root, Text = "", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 50, AutoButtonColor = false })
+		local overlay = popup
 		popup.Activated:Connect(closePopup)
 		noFocus[popup], popup.Selectable = true, false
 		local focused = ownsSelection() and GuiService.SelectedObject
-		local list = new("ScrollingFrame", {
-			Parent = popup, Position = UDim2.fromOffset(x, y), Size = UDim2.fromOffset(w, h),
-			BackgroundColor3 = Theme.Background, BorderSizePixel = 0, ScrollBarThickness = 3, ScrollBarImageColor3 = Theme.Scrollbar,
-			CanvasSize = UDim2.new(), AutomaticCanvasSize = AUTO_Y, ScrollingDirection = Enum.ScrollingDirection.Y,
-		}, { corner(3), stroke(), vlist(0), padding(0, 0, 1, 1) })
-		local items = {}
-		local function paint()
-			for v, item in pairs(items) do item.TextColor3 = isSelected(v) and Theme.Accent or Theme.SubText end
+		local menu = new("Frame", {
+			Name = "DropdownMenu", Parent = popup, Position = UDim2.fromOffset(x, y + 6), Size = UDim2.fromOffset(w, h),
+			BackgroundColor3 = Theme.Background, BackgroundTransparency = 1, BorderSizePixel = 0, ClipsDescendants = true,
+		}, { corner(3), stroke() })
+		menu.SelectionGroup = true
+		menu.SelectionBehaviorUp, menu.SelectionBehaviorDown = Enum.SelectionBehavior.Stop, Enum.SelectionBehavior.Stop
+		menu.SelectionBehaviorLeft, menu.SelectionBehaviorRight = Enum.SelectionBehavior.Stop, Enum.SelectionBehavior.Stop
+		local searchBox
+		if searchable then
+			searchBox = new("TextBox", {
+				Name = "DropdownSearch", Parent = menu, Position = UDim2.fromOffset(6, 4), Size = UDim2.new(1, -12, 0, 28),
+				Text = "", PlaceholderText = "Search...", PlaceholderColor3 = Theme.Muted, TextColor3 = Theme.Text,
+				TextSize = 14, FontFace = Font.new(FONT), TextXAlignment = Enum.TextXAlignment.Left,
+				ClearTextOnFocus = false, BackgroundColor3 = Theme.Panel, BorderSizePixel = 0,
+			}, { corner(3), padding(9, 9) })
 		end
-		list.SelectionGroup = true -- keyboard/gamepad focus stays in the list until it closes
-		list.SelectionBehaviorUp, list.SelectionBehaviorDown = Enum.SelectionBehavior.Stop, Enum.SelectionBehavior.Stop
-		list.SelectionBehaviorLeft, list.SelectionBehaviorRight = Enum.SelectionBehavior.Stop, Enum.SelectionBehavior.Stop
-		local firstItem, selectedItem
+		local list = new("ScrollingFrame", {
+			Name = "DropdownList", Parent = menu, Position = UDim2.fromOffset(0, searchHeight), Size = UDim2.new(1, 0, 1, -searchHeight),
+			BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3, ScrollBarImageColor3 = Theme.Scrollbar,
+			CanvasSize = UDim2.new(), AutomaticCanvasSize = AUTO_Y, ScrollingDirection = Enum.ScrollingDirection.Y,
+		}, { vlist(0), padding(0, 0, 1, 1) })
+		local items, firstItem, selectedItem = {}, nil, nil
+		local empty = label({ Name = "NoResults", Parent = list, Text = "No results", TextSize = 14, TextColor3 = Theme.Muted,
+			Size = UDim2.new(1, 0, 0, 28), LayoutOrder = #options * 2 + 1, Visible = false })
+		padding(10, 10).Parent = empty
+		local function paint()
+			local query = searchBox and string.lower(searchBox.Text) or ""
+			local visible = 0
+			for _, entry in ipairs(items) do
+				local selected = isSelected(entry.value)
+				entry.item.TextColor3 = selected and Theme.Accent or Theme.SubText
+				entry.item.LayoutOrder = entry.index + (searchable and not selected and #options or 0)
+				entry.item.Visible = query == "" or string.find(string.lower(tostring(entry.value)), query, 1, true) ~= nil
+				if entry.item.Visible then visible += 1 end
+			end
+			empty.Visible = searchable and visible == 0
+			selDirty = true
+		end
 		for i, v in ipairs(options) do
 			local item = new("TextButton", {
 				Parent = list, Text = tostring(v), TextSize = 14, FontFace = Font.new(FONT),
@@ -1789,31 +1816,34 @@ function Library:CreateWindow(opts)
 				BackgroundColor3 = Theme.Panel, BackgroundTransparency = 1, AutoButtonColor = false,
 				Size = UDim2.new(1, 0, 0, 28), LayoutOrder = i,
 			}, { padding(10, 10) })
-			items[v] = item
+			table.insert(items, { value = v, item = item, index = i })
 			firstItem = firstItem or item
 			if isSelected(v) then selectedItem = selectedItem or item end
-			hover(item, function(on) item.BackgroundTransparency = on and 0 or 1 end)
+			hover(item, function(on) animate(item, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { BackgroundTransparency = on and 0 or 1 }) end)
 			item.Activated:Connect(function()
 				if pick(v) then paint() else closePopup() end
 			end)
 		end
 		paint()
+		if searchBox then searchBox:GetPropertyChangedSignal("Text"):Connect(function() list.CanvasPosition = Vector2.zero; paint() end) end
+		animate(menu, TweenInfo.new(0.18, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), { Position = UDim2.fromOffset(x, y), BackgroundTransparency = 0 })
 		local clip = anchor:FindFirstAncestorOfClass("ScrollingFrame")
 		local function follow()
-			if not popup or not popup.Parent then return end
+			if popup ~= overlay or not overlay.Parent then return end
 			local shown = anchor.Parent ~= nil
 			local o = anchor
 			while shown and o and o ~= root do
 				if o:IsA("GuiObject") and not o.Visible then shown = false end
 				o = o.Parent
 			end
-			if shown and clip then -- scrolled out of its page
+			if shown and clip then
 				local cy, ay = clip.AbsolutePosition.Y, anchor.AbsolutePosition.Y + anchor.AbsoluteSize.Y / 2
 				shown = ay >= cy and ay <= cy + clip.AbsoluteSize.Y
 			end
 			if not shown then return closePopup() end
 			local nx, ny, nw, nh = placement()
-			list.Position, list.Size = UDim2.fromOffset(nx, ny), UDim2.fromOffset(nw, nh)
+			anim:Stop(menu, { "Position" })
+			menu.Position, menu.Size = UDim2.fromOffset(nx, ny), UDim2.fromOffset(nw, nh)
 		end
 		local conns = {
 			anchor:GetPropertyChangedSignal("AbsolutePosition"):Connect(follow),
@@ -1821,11 +1851,13 @@ function Library:CreateWindow(opts)
 			root:GetPropertyChangedSignal("AbsoluteSize"):Connect(follow),
 		}
 		popup.Destroying:Connect(function()
+			anim:Stop(menu)
+			for _, entry in ipairs(items) do anim:Stop(entry.item) end
 			for _, c in ipairs(conns) do c:Disconnect() end
 		end)
-		if focused then -- opened from the keyboard/gamepad: focus the current choice, return there on close
+		if focused then
 			popupReturn = focused
-			focusTo(selectedItem or firstItem)
+			focusTo(selectedItem or firstItem or searchBox)
 		end
 	end
 
@@ -1927,33 +1959,67 @@ function Library:CreateWindow(opts)
 			end
 			return k
 		end
-		-- Rows whose control is a wide field (dropdown, text input) stack the field under the label when the
-		-- section is too narrow to keep both readable side by side.
-		local wideRows, stacked = {}, false
+		-- SmartRowLayout: each wide control makes its own decision from measured text,
+		-- available logical width and its control constraints. Width changes are coalesced.
+		local wideRows, rowCheckQueued = {}, false
 		local function applyStack(r)
-			local t = style
+			local t, width = style, math.floor(px(r.f.AbsoluteSize.X) + 0.5)
+			if width <= 0 then return end
+			local minControl = num(r.options.ControlMinWidth) and math.max(32, r.options.ControlMinWidth) or (t.FieldInset * 2 + t.FieldTextSize * 6)
+			if UIS.TouchEnabled then minControl = math.max(minControl, 100) end
+			local maxControl = num(r.options.ControlMaxWidth) and math.max(minControl, r.options.ControlMaxWidth) or math.max(minControl, t.FieldMaxWidth)
+			local measureKey = tostring(t.TitleSize) .. ":" .. tostring(t.DescriptionSize)
+			if r.measureKey ~= measureKey then
+				r.measureKey = measureKey
+				local titleWidth = textWidth(r.options.Title or "", t.TitleSize, r.title.FontFace)
+				local wordWidth = 0
+				for word in string.gmatch(r.options.Description or "", "%S+") do
+					wordWidth = math.max(wordWidth, textWidth(word, t.DescriptionSize, r.title.FontFace))
+				end
+				r.textMin = math.max(t.TitleSize * 5, math.min(180, titleWidth), math.min(140, wordWidth))
+			end
+			local requested = r.options.RowLayout
+			local requiredText = requested == "Inline" and t.TitleSize * 5 or r.textMin
+			local fits = width >= minControl + t.RowGap + requiredText
+			local stacked = requested == "Stacked" or requested == "FullWidth" or not fits
+			local valueKey = tostring(r.valueText or "") .. ":" .. tostring(t.FieldTextSize)
+			if r.valueKey ~= valueKey then
+				r.valueKey = valueKey
+				r.valueWidth = textWidth(r.valueText or "", t.FieldTextSize, r.title.FontFace) + t.FieldInset * 2 + 14
+			end
+			local preferred = math.clamp(math.max(math.floor(width * t.FieldWidthScale + 0.5), r.valueWidth), minControl, maxControl)
+			local fieldWidth = stacked and math.min(width, num(r.options.ControlMaxWidth) and maxControl or width)
+				or math.min(preferred, width - t.RowGap - requiredText)
+			fieldWidth = math.max(0, math.floor(fieldWidth + 0.5))
+			anim:Stop(r.right, { "Size" })
+			anim:Stop(r.limit, { "MaxSize" })
+			anim:Stop(r.list, { "Padding" })
 			r.list.FillDirection = stacked and Enum.FillDirection.Vertical or HORIZONTAL
 			r.flex.FlexMode = stacked and Enum.UIFlexMode.None or Enum.UIFlexMode.Fill
 			r.group.Size = stacked and UDim2.new(1, 0, 0, 0) or UDim2.new(0, 0, 0, 0)
-			sty(r.list, { Padding = UDim.new(0, stacked and t.StackGap or t.RowGap) })
-			sty(r.right, { Size = stacked and UDim2.new(1, 0, 0, t.FieldHeight) or UDim2.new(t.FieldWidthScale, 0, 0, t.FieldHeight) })
-			sty(r.limit, { MaxSize = Vector2.new(stacked and 4000 or t.FieldMaxWidth, t.FieldHeight) })
+			r.list.Padding = UDim.new(0, stacked and t.StackGap or t.RowGap)
+			r.right.Size = UDim2.fromOffset(fieldWidth, t.FieldHeight)
+			r.limit.MaxSize = Vector2.new(math.max(fieldWidth, 1), t.FieldHeight)
 		end
 		local function checkStack()
-			local w = px(elements.AbsoluteSize.X)
-			local want = w > 0 and w < style.StackBelow
-			if want == stacked then return end
-			stacked = want
-			for _, r in ipairs(wideRows) do applyStack(r) end
+			if rowCheckQueued then return end
+			rowCheckQueued = true
+			task.defer(function()
+				rowCheckQueued = false
+				if not elements.Parent or not page.frame.Visible then return end
+				for _, r in ipairs(wideRows) do if r.f.Parent then applyStack(r) end end
+			end)
 		end
 		elements:GetPropertyChangedSignal("AbsoluteSize"):Connect(checkStack)
+		local pageVisibility = page.frame:GetPropertyChangedSignal("Visible"):Connect(checkStack)
+		elements.Destroying:Connect(function() pageVisibility:Disconnect() end)
 
 		-- Title + wrapping description on the left, controls on the right; the whole row is the tap target.
 		local function row(o, parent)
 			local f = new("TextButton", {
 				Name = o.Title or "Row", Parent = parent or elements, Text = "", AutoButtonColor = false, BackgroundTransparency = 1,
 				Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, LayoutOrder = nextOrder(),
-			}, { hlist(0) })
+			}, { hlist(0, nil, Enum.VerticalAlignment.Top) })
 			table.insert(stops, f)
 			local entry = { page = page, row = f, title = o.Title or "", reveal = reveal, section = sectionName }
 			table.insert(searchRecords, entry)
@@ -1962,9 +2028,9 @@ function Library:CreateWindow(opts)
 			local group = new("Frame", { Name = "TextGroup", Parent = f, Size = UDim2.new(0, 0, 0, 0), AutomaticSize = AUTO_Y, BackgroundTransparency = 1, LayoutOrder = 1 }, {
 				new("UIFlexItem", { FlexMode = Enum.UIFlexMode.Fill }), groupList,
 			})
-			local title = label({ Name = "Title", Parent = group, Text = o.Title or "", TextSize = 14, FontFace = Font.new(FONT, W.Medium), TextColor3 = Theme.SubText, Size = UDim2.new(1, 0, 0, 16) })
+			local title = label({ Name = "Title", Parent = group, Text = o.Title or "", TextSize = 14, FontFace = Font.new(FONT, W.Medium), TextColor3 = Theme.SubText, TextWrapped = true, TextTruncate = Enum.TextTruncate.None, TextYAlignment = Enum.TextYAlignment.Top, AutomaticSize = AUTO_Y, Size = UDim2.new(1, 0, 0, 16) })
 			local desc
-			if o.Description then
+			if type(o.Description) == "string" and o.Description ~= "" then
 				desc = label({
 					Name = "Description", Parent = group, Text = o.Description, TextSize = 14, LineHeight = 1.07, TextColor3 = Theme.Muted,
 					TextWrapped = true, TextTruncate = Enum.TextTruncate.None, TextYAlignment = Enum.TextYAlignment.Top,
@@ -1975,7 +2041,7 @@ function Library:CreateWindow(opts)
 			local right = new("Frame", { Name = "Right", Parent = f, BackgroundTransparency = 1, Size = UDim2.fromOffset(82, 28), AutomaticSize = AUTO_X, LayoutOrder = 2 }, {
 				hlist(2, Enum.HorizontalAlignment.Right),
 			})
-			local info = { f = f, right = right }
+			local info = { f = f, right = right, title = title, options = o }
 			bindStyle(page, f, function(t)
 				title.TextSize = t.TitleSize -- text sizes switch instantly (tweening them jitters); geometry tweens
 				sty(title, { Size = UDim2.new(1, 0, 0, t.TitleHeight) })
@@ -2000,9 +2066,10 @@ function Library:CreateWindow(opts)
 			right.AutomaticSize = AUTO_NONE
 			local limit = new("UISizeConstraint", { Parent = right, MaxSize = Vector2.new(style.FieldMaxWidth, style.FieldHeight) })
 			local group = f:FindFirstChild("TextGroup")
-			local r = { list = f:FindFirstChildOfClass("UIListLayout"), group = group, flex = group:FindFirstChildOfClass("UIFlexItem"), right = right, limit = limit }
+			local r = { f = f, title = info.title, options = info.options, list = f:FindFirstChildOfClass("UIListLayout"), group = group, flex = group:FindFirstChildOfClass("UIFlexItem"), right = right, limit = limit }
 			info.wide = r
 			table.insert(wideRows, r)
+			f:GetPropertyChangedSignal("AbsoluteSize"):Connect(checkStack)
 			applyStack(r)
 			checkStack()
 			return fieldCorner(field({ Name = "Box", Parent = right, Size = UDim2.fromScale(1, 1) }))
@@ -2220,6 +2287,7 @@ function Library:CreateWindow(opts)
 				end
 				text.Text = shown ~= nil and tostring(shown) or "--"
 				text.TextColor3 = shown ~= nil and Theme.Text or Theme.Muted
+				if info.wide then info.wide.valueText = text.Text; checkStack() end
 			end
 			local key
 			function d._apply(v)
@@ -2247,7 +2315,7 @@ function Library:CreateWindow(opts)
 				d:Set(list)
 				return true
 			end
-			f.Activated:Connect(function() openList(box, options, isSelected, pick) end)
+			f.Activated:Connect(function() openList(box, options, isSelected, pick, true) end)
 			d.Value = o.Multi and table.clone(o.Default or {}) or o.Default
 			show()
 			key = track(o, d, d.Value, function()
@@ -2348,11 +2416,12 @@ function Library:CreateWindow(opts)
 			local o = args(a, b)
 			local f, _, _, info = row(o)
 			local box = wideRight(info)
+			box.ClipsDescendants = true
 			local tb = textBox(box, { Text = o.Default or "", PlaceholderText = o.Placeholder or "--", TextXAlignment = Enum.TextXAlignment.Left })
 			noFocus[tb] = true -- the row is the focus stop; Enter/A puts the caret in the box
-			local inset = padding(10, 10)
-			inset.Parent = box
-			bindStyle(page, inset, function(tk) sty(inset, { PaddingLeft = UDim.new(0, tk.FieldInset), PaddingRight = UDim.new(0, tk.FieldInset) }) end)
+			bindStyle(page, tb, function(tk)
+				sty(tb, { Position = UDim2.fromOffset(tk.FieldInset, 0), Size = UDim2.new(1, -2 * tk.FieldInset, 1, 0) })
+			end)
 			local inp = { Value = tb.Text }
 			local key
 			function inp._apply(v)
