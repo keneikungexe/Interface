@@ -1409,7 +1409,7 @@ function Library:CreateWindow(opts)
 	search.resizeResults = function()
 		if not search.results.Visible then return end
 		local maxHeight = math.max(42, math.min(280, size.Y - HEADER_H - 12))
-		search.results.Size = UDim2.fromOffset(math.max(120, math.min(340, size.X - 20)), math.min(maxHeight, (search.resultRows or 1) * 44 + 8))
+		search.results.Size = UDim2.fromOffset(math.max(120, math.min(340, size.X - 20)), math.min(maxHeight, search.resultHeight or 44))
 	end
 	search.targetWidth = function()
 		local titleWidth = textWidth(titleLabel.Text, 16, titleLabel.FontFace)
@@ -1543,7 +1543,10 @@ function Library:CreateWindow(opts)
 				end
 			end
 		end
-		search.resultRows = math.max(1, #matches + (query == "" and 1 or 0))
+		-- Include both the Favorites heading and the empty-state message.
+		local headingHeight = query == "" and 30 or 0 -- 28px plus the list gap
+		local contentHeight = #matches == 0 and 36 or (#matches * 42 + math.max(0, #matches - 1) * 2)
+		search.resultHeight = 8 + headingHeight + contentHeight -- vertical padding
 		search.resizeResults()
 		selDirty = true
 	end
@@ -1927,14 +1930,6 @@ function Library:CreateWindow(opts)
 				c:Set(type(original) == "table" and table.clone(original) or original)
 				return true
 			end
-			if o.Reset ~= false and rowFrame then
-				local title = rowFrame:FindFirstChild("TextGroup"):FindFirstChild("Title")
-				local reset = new("TextButton", { Name = "Reset " .. (o.Title or "setting"), Parent = title, Text = "Reset", TextSize = 11, FontFace = Font.new(FONT), TextColor3 = Theme.Muted, BackgroundTransparency = 1, AutoButtonColor = false, Position = UDim2.new(1, 4, 0, 0), Size = UDim2.fromOffset(34, 24), ZIndex = title.ZIndex + 1 })
-				table.insert(stops, reset)
-				bindStyle(page, title, function(t) sty(title, { Size = UDim2.new(1, -38, 0, t.TitleHeight) }) end)
-				hover(reset, function(on) animate(reset, FAST, { TextColor3 = on and Theme.Accent or Theme.Muted }) end)
-				reset.Activated:Connect(function() if c:Reset() and notify then notify((o.Title or "Setting") .. " reset", "success") end end)
-			end
 			local k
 			if o.Save == false then
 				k = keyOf(o)
@@ -2197,6 +2192,8 @@ function Library:CreateWindow(opts)
 		function Section:AddToggle(a, b)
 			local o = args(a, b)
 			local f, title, right = row(o)
+			-- Center the checkbox and optional gear alongside the complete text block.
+			f:FindFirstChildOfClass("UIListLayout").VerticalAlignment = CENTER_Y
 			local optionsOrder = nextOrder() -- reserved directly under the row for the options panel
 			local gear, gearIcon
 			local t = { Value = false }
