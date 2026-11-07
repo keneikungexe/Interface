@@ -51,7 +51,7 @@ local STYLE_TOKENS = {
 		SectionGap = 10, SectionMin = 300, LoneMax = 720,
 		SectionPad = { 15, 14, 14, 14 }, SectionPadMobile = { 12, 12, 12, 12 },
 		SectionHeaderHeight = 20, SectionTitleSize = 18, SectionHeaderGap = 10, SectionCorner = 3, BorderThickness = 1, BorderTransparency = 0,
-		RowGap = 10, TitleSize = 14, TitleHeight = 16, DescriptionSize = 14, DescriptionLineHeight = 1.07, DescriptionSpacing = 5,
+		RowGap = 6, TitleSize = 14, TitleHeight = 16, DescriptionSize = 14, DescriptionLineHeight = 1.07, DescriptionSpacing = 2,
 		RowMinHeight = 0, ControlMinWidth = 82, ControlRowHeight = 28,
 		CheckSize = 20, CheckHolder = 28, CheckRing = true, CheckCorner = 2,
 		ControlHeight = 32, ButtonTextSize = 14, ControlCorner = 3,
@@ -1931,7 +1931,7 @@ function Library:CreateWindow(opts)
 				local title = rowFrame:FindFirstChild("TextGroup"):FindFirstChild("Title")
 				local reset = new("TextButton", { Name = "Reset " .. (o.Title or "setting"), Parent = title, Text = "Reset", TextSize = 11, FontFace = Font.new(FONT), TextColor3 = Theme.Muted, BackgroundTransparency = 1, AutoButtonColor = false, Position = UDim2.new(1, 4, 0, 0), Size = UDim2.fromOffset(34, 24), ZIndex = title.ZIndex + 1 })
 				table.insert(stops, reset)
-				bindStyle(page, title, function(t) sty(title, { Size = UDim2.new(1, -38, 0, t.TitleHeight) }) end)
+				bindStyle(page, title, function(t) sty(title, { Size = UDim2.new(1, -38, 0, 0) }) end)
 				hover(reset, function(on) animate(reset, FAST, { TextColor3 = on and Theme.Accent or Theme.Muted }) end)
 				reset.Activated:Connect(function() if c:Reset() and notify then notify((o.Title or "Setting") .. " reset", "success") end end)
 			end
@@ -1961,7 +1961,7 @@ function Library:CreateWindow(opts)
 		end
 		-- SmartRowLayout: each wide control makes its own decision from measured text,
 		-- available logical width and its control constraints. Width changes are coalesced.
-		local wideRows, rowCheckQueued = {}, false
+		local wideRows, descriptionRows, rowCheckQueued = {}, {}, false
 		local function applyStack(r)
 			local t, width = style, math.floor(px(r.f.AbsoluteSize.X) + 0.5)
 			if width <= 0 then return end
@@ -2008,6 +2008,7 @@ function Library:CreateWindow(opts)
 				rowCheckQueued = false
 				if not elements.Parent or not page.frame.Visible then return end
 				for _, r in ipairs(wideRows) do if r.f.Parent then applyStack(r) end end
+				for _, r in ipairs(descriptionRows) do if r.view.Parent then r.update(false) end end
 			end)
 		end
 		elements:GetPropertyChangedSignal("AbsoluteSize"):Connect(checkStack)
@@ -2028,14 +2029,64 @@ function Library:CreateWindow(opts)
 			local group = new("Frame", { Name = "TextGroup", Parent = f, Size = UDim2.new(0, 0, 0, 0), AutomaticSize = AUTO_Y, BackgroundTransparency = 1, LayoutOrder = 1 }, {
 				new("UIFlexItem", { FlexMode = Enum.UIFlexMode.Fill }), groupList,
 			})
-			local title = label({ Name = "Title", Parent = group, Text = o.Title or "", TextSize = 14, FontFace = Font.new(FONT, W.Medium), TextColor3 = Theme.SubText, TextWrapped = true, TextTruncate = Enum.TextTruncate.None, TextYAlignment = Enum.TextYAlignment.Top, AutomaticSize = AUTO_Y, Size = UDim2.new(1, 0, 0, 16) })
-			local desc
+			local title = label({ Name = "Title", Parent = group, Text = o.Title or "", TextSize = 14, FontFace = Font.new(FONT, W.Medium), TextColor3 = Theme.SubText, TextWrapped = true, TextTruncate = Enum.TextTruncate.None, TextYAlignment = Enum.TextYAlignment.Top, AutomaticSize = AUTO_Y, Size = UDim2.new(1, 0, 0, 0) })
+			local desc, description
 			if type(o.Description) == "string" and o.Description ~= "" then
+				local view = new("Frame", { Name = "DescriptionView", Parent = group, BackgroundTransparency = 1,
+					Size = UDim2.new(1, 0, 0, 0), ClipsDescendants = true, LayoutOrder = 1 })
 				desc = label({
-					Name = "Description", Parent = group, Text = o.Description, TextSize = 14, LineHeight = 1.07, TextColor3 = Theme.Muted,
+					Name = "Description", Parent = view, Text = o.Description, TextSize = 14, LineHeight = 1.07, TextColor3 = Theme.Muted,
 					TextWrapped = true, TextTruncate = Enum.TextTruncate.None, TextYAlignment = Enum.TextYAlignment.Top,
-					Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y, LayoutOrder = 1,
+					Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AUTO_Y,
 				})
+				local more = new("TextButton", { Name = "DescriptionDisclosure", Parent = group, Text = "Show more",
+					TextSize = 13, FontFace = Font.new(FONT, W.Medium), TextColor3 = Theme.Accent,
+					TextXAlignment = Enum.TextXAlignment.Left, BackgroundTransparency = 1, AutoButtonColor = false,
+					Size = UDim2.new(1, 0, 0, UIS.TouchEnabled and 36 or 22), LayoutOrder = 2, Visible = false })
+				table.insert(stops, more)
+				local mode = o.DescriptionMode or opts.DescriptionMode or "Auto"
+				if mode ~= "Auto" and mode ~= "Short" and mode ~= "Full" then mode = "Auto" end
+				local maxLines = num(o.DescriptionMaxLines) and o.DescriptionMaxLines or (num(opts.DescriptionMaxLines) and opts.DescriptionMaxLines or 2)
+				maxLines = math.clamp(math.floor(maxLines), 1, 20)
+				local expanded, targetHeight, lineKey, lineHeight = false, nil, nil, nil
+				description = { view = view }
+				function description.update(animateChange)
+					if not view.Parent or view.AbsoluteSize.X <= 0 then return end
+					local fullHeight = math.max(0, math.ceil(px(desc.TextBounds.Y)))
+					if fullHeight <= 0 then return end
+					local key = tostring(style.DescriptionSize) .. ":" .. tostring(style.DescriptionLineHeight)
+					if key ~= lineKey then
+						lineKey = key
+						textWidth("Ag", style.DescriptionSize, desc.FontFace)
+						lineHeight = math.max(1, math.ceil(measurer.TextBounds.Y * style.DescriptionLineHeight))
+					end
+					local limit = lineHeight * maxLines
+					local constrained = px(view.AbsoluteSize.X) < 240
+					local overflow = fullHeight > limit + 1 and (mode == "Short" or (mode == "Auto" and constrained))
+					local height = overflow and not expanded and math.min(fullHeight, limit) or fullHeight
+					if more.Visible ~= overflow then
+						local returnFocus = not overflow and GuiService.SelectedObject == more
+						more.Visible = overflow
+						selDirty = true
+						if returnFocus then focusTo(f) end
+					end
+					more.Text = expanded and "Show less" or "Show more"
+					if targetHeight == height then return end
+					targetHeight = height
+					if animateChange and page == current and layoutReady then
+						animate(view, TweenInfo.new(0.22, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), { Size = UDim2.new(1, 0, 0, height) })
+					else
+						anim:Stop(view, { "Size" })
+						view.Size = UDim2.new(1, 0, 0, height)
+					end
+				end
+				table.insert(descriptionRows, description)
+				desc:GetPropertyChangedSignal("TextBounds"):Connect(checkStack)
+				view:GetPropertyChangedSignal("AbsoluteSize"):Connect(checkStack)
+				view.Destroying:Connect(function() anim:Stop(view) end)
+				more.Destroying:Connect(function() anim:Stop(more) end)
+				more.Activated:Connect(function() expanded = not expanded; description.update(true) end)
+				hover(more, function(on) animate(more, FAST, { TextColor3 = on and Theme.Text or Theme.Accent }) end)
 			end
 			-- at least 82px wide so descriptions wrap where the reference wraps, gear or not
 			local right = new("Frame", { Name = "Right", Parent = f, BackgroundTransparency = 1, Size = UDim2.fromOffset(82, 28), AutomaticSize = AUTO_X, LayoutOrder = 2 }, {
@@ -2044,8 +2095,8 @@ function Library:CreateWindow(opts)
 			local info = { f = f, right = right, title = title, options = o }
 			bindStyle(page, f, function(t)
 				title.TextSize = t.TitleSize -- text sizes switch instantly (tweening them jitters); geometry tweens
-				sty(title, { Size = UDim2.new(1, 0, 0, t.TitleHeight) })
-				if desc then desc.TextSize, desc.LineHeight = t.DescriptionSize, t.DescriptionLineHeight end
+				sty(title, { Size = UDim2.new(1, 0, 0, 0) })
+				if desc then desc.TextSize, desc.LineHeight = t.DescriptionSize, t.DescriptionLineHeight; checkStack() end
 				sty(groupList, { Padding = UDim.new(0, t.DescriptionSpacing) })
 				sty(f, { Size = UDim2.new(1, 0, 0, rowMin(t)) })
 				if info.wide then
