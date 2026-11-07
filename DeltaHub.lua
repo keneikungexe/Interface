@@ -51,7 +51,7 @@ local STYLE_TOKENS = {
 		SectionGap = 10, SectionMin = 300, LoneMax = 720,
 		SectionPad = { 15, 14, 14, 14 }, SectionPadMobile = { 12, 12, 12, 12 },
 		SectionHeaderHeight = 20, SectionTitleSize = 18, SectionHeaderGap = 10, SectionCorner = 3, BorderThickness = 1, BorderTransparency = 0,
-		RowGap = 6, TitleSize = 14, TitleHeight = 16, DescriptionSize = 14, DescriptionLineHeight = 1.07, DescriptionSpacing = 2,
+		RowGap = 10, TitleSize = 14, TitleHeight = 16, DescriptionSize = 14, DescriptionLineHeight = 1.07, DescriptionSpacing = 5,
 		RowMinHeight = 0, ControlMinWidth = 82, ControlRowHeight = 28,
 		CheckSize = 20, CheckHolder = 28, CheckRing = true, CheckCorner = 2,
 		ControlHeight = 32, ButtonTextSize = 14, ControlCorner = 3,
@@ -922,7 +922,7 @@ function Library:CreateWindow(opts)
 			for _, s in ipairs(p.sections) do
 				local cap = lone and math.min(style.LoneMax, grid) or grid
 				local w = math.min(W, cap, s.maxW or math.huge)
-				s.to = { x = math.floor((W - w) / 2), y = y, w = w }
+				s.to = { x = 0, y = y, w = w }
 				y += heightOf(s) + style.SectionGap
 			end
 			contentH = math.max(0, y - style.SectionGap)
@@ -935,7 +935,7 @@ function Library:CreateWindow(opts)
 				end
 			end
 			local wl, wr = math.min(cw, capL), math.min(cw, capR)
-			local ox = math.floor((W - (wl + style.SectionGap + wr)) / 2)
+			local ox = 0
 			if equalRows then
 				local left, right, y = {}, {}, 0
 				local function flushRows()
@@ -952,7 +952,7 @@ function Library:CreateWindow(opts)
 					if s.full then
 						flushRows()
 						local w = math.min(grid, s.maxW or grid)
-						s.to = { x = math.floor((W - w) / 2), y = y, w = w }
+						s.to = { x = ox, y = y, w = w }
 						y += naturalHeight(s) + style.SectionGap
 					elseif s.autoSide == "Left" then table.insert(left, s) else table.insert(right, s) end
 				end
@@ -964,7 +964,7 @@ function Library:CreateWindow(opts)
 					local h = heightOf(s)
 					if s.full then
 						local top, w = math.max(yl, yr), math.min(grid, s.maxW or grid)
-						s.to = { x = math.floor((W - w) / 2), y = top, w = w }
+						s.to = { x = ox, y = top, w = w }
 						yl, yr = top + h + style.SectionGap, top + h + style.SectionGap
 					elseif s.autoSide == "Left" then
 						s.to = { x = ox, y = yl, w = math.min(wl, s.maxW or wl) }
@@ -1931,7 +1931,7 @@ function Library:CreateWindow(opts)
 				local title = rowFrame:FindFirstChild("TextGroup"):FindFirstChild("Title")
 				local reset = new("TextButton", { Name = "Reset " .. (o.Title or "setting"), Parent = title, Text = "Reset", TextSize = 11, FontFace = Font.new(FONT), TextColor3 = Theme.Muted, BackgroundTransparency = 1, AutoButtonColor = false, Position = UDim2.new(1, 4, 0, 0), Size = UDim2.fromOffset(34, 24), ZIndex = title.ZIndex + 1 })
 				table.insert(stops, reset)
-				bindStyle(page, title, function(t) sty(title, { Size = UDim2.new(1, -38, 0, 0) }) end)
+				bindStyle(page, title, function(t) sty(title, { Size = UDim2.new(1, -38, 0, t.TitleHeight) }) end)
 				hover(reset, function(on) animate(reset, FAST, { TextColor3 = on and Theme.Accent or Theme.Muted }) end)
 				reset.Activated:Connect(function() if c:Reset() and notify then notify((o.Title or "Setting") .. " reset", "success") end end)
 			end
@@ -2029,7 +2029,7 @@ function Library:CreateWindow(opts)
 			local group = new("Frame", { Name = "TextGroup", Parent = f, Size = UDim2.new(0, 0, 0, 0), AutomaticSize = AUTO_Y, BackgroundTransparency = 1, LayoutOrder = 1 }, {
 				new("UIFlexItem", { FlexMode = Enum.UIFlexMode.Fill }), groupList,
 			})
-			local title = label({ Name = "Title", Parent = group, Text = o.Title or "", TextSize = 14, FontFace = Font.new(FONT, W.Medium), TextColor3 = Theme.SubText, TextWrapped = true, TextTruncate = Enum.TextTruncate.None, TextYAlignment = Enum.TextYAlignment.Top, AutomaticSize = AUTO_Y, Size = UDim2.new(1, 0, 0, 0) })
+			local title = label({ Name = "Title", Parent = group, Text = o.Title or "", TextSize = 14, FontFace = Font.new(FONT, W.Medium), TextColor3 = Theme.SubText, TextWrapped = true, TextTruncate = Enum.TextTruncate.None, TextYAlignment = Enum.TextYAlignment.Top, AutomaticSize = AUTO_Y, Size = UDim2.new(1, 0, 0, 16) })
 			local desc, description
 			if type(o.Description) == "string" and o.Description ~= "" then
 				local view = new("Frame", { Name = "DescriptionView", Parent = group, BackgroundTransparency = 1,
@@ -2095,7 +2095,7 @@ function Library:CreateWindow(opts)
 			local info = { f = f, right = right, title = title, options = o }
 			bindStyle(page, f, function(t)
 				title.TextSize = t.TitleSize -- text sizes switch instantly (tweening them jitters); geometry tweens
-				sty(title, { Size = UDim2.new(1, 0, 0, 0) })
+				sty(title, { Size = UDim2.new(1, 0, 0, t.TitleHeight) })
 				if desc then desc.TextSize, desc.LineHeight = t.DescriptionSize, t.DescriptionLineHeight; checkStack() end
 				sty(groupList, { Padding = UDim.new(0, t.DescriptionSpacing) })
 				sty(f, { Size = UDim2.new(1, 0, 0, rowMin(t)) })
